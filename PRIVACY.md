@@ -11,8 +11,8 @@ choose.
   transcription are captured and stored on your computer.
 - Parakeet, Whisper, and GigaAM transcription run locally. The optional live
   transcript uses a separate local streaming model on both platforms. Ollama
-  summaries run locally when its Base URL is localhost/loopback; another host
-  receives the summary input.
+  and LM Studio summaries run locally when their Base URL is localhost/loopback;
+  another host receives the summary input.
 - If you enable AssemblyAI, OpenAI, or ElevenLabs transcription, Amanu uploads
   the meeting audio to that provider.
 - If you select Claude Code, Codex, Anthropic, or OpenAI for summaries or

@@ -468,11 +468,16 @@ only values that differ from the defaults. A compact example:
   summaries are off, unless `speaker_names.backend` names a backend of its own.
 - `summary.*` covers `enabled`, `backend`, `language`, `model`,
   `openai_model`, `openai_base_url`, `ollama_model`, `ollama_base_url`,
+  `lmstudio_model`, `lmstudio_base_url`, `lmstudio_api_key_path`,
   `template`, `api_key_path`, `openai_api_key_path`, and
-  `openai_compatible_api_key_path`. The two Base URLs
-  allow OpenAI-compatible servers and a non-default Ollama host; only a
-  loopback Ollama URL keeps the transcript on your computer, and any other host
-  must be reached over https — plain http is refused for remote servers. The OpenAI
+  `openai_compatible_api_key_path`. The Base URLs
+  allow OpenAI-compatible servers, a non-default Ollama host and LM Studio; only a
+  loopback Ollama or LM Studio URL keeps the transcript on your computer, and any
+  other host must be reached over https — plain http is refused for remote servers.
+  LM Studio (backend `lmstudio`, macOS only for now) joins `auto` only once
+  `lmstudio_model` or `lmstudio_base_url` is set, ahead of Ollama; it needs no
+  key unless its Require Authentication switch is on, and then the token is read
+  from `lmstudio_api_key_path` alone — never from the OpenAI key. The OpenAI
   key is only ever sent to OpenAI: `summary.openai_api_key_path` names it for
   summaries while `openai_base_url` is OpenAI's own, and
   `transcription.openai.api_key_path` names it for transcription (an older
@@ -480,13 +485,31 @@ only values that differ from the defaults. A compact example:
   the summary talks to OpenAI). The key for any other server is
   `summary.openai_compatible_api_key_path`, or one pasted in Setup, which is
   kept in `~/.config/amanu/keys/openai-compatible`. `amanu doctor` walks the configured summary backend,
-  including whether Ollama is answering and has the chosen model. `template` contains
+  including whether Ollama or LM Studio is answering and has the chosen model. `template` contains
   the complete summary instructions and starts with Amanu's built-in default.
   In Settings → Setup → My own key, choose OpenAI, Anthropic, or
   OpenAI-compatible. The compatible option exposes the server URL and uses its
   own key. `summary.openai_compatible: false` selects OpenAI’s API while keeping
   a saved custom URL; `true` selects that URL. Older configs infer the choice
   from `openai_base_url` when the setting is absent.
+- To write summaries and name speakers with LM Studio (macOS), start its local
+  server, download a chat model, and load it with a context of at least 16k
+  tokens: a model loaded on demand gets LM Studio's default of 8k, and a
+  meeting longer than the context is cut to fit it. Then name the model:
+
+  ```json
+  {
+    "summary": {
+      "backend": "lmstudio",
+      "lmstudio_model": "google/gemma-4-12b"
+    }
+  }
+  ```
+
+  The model must be one LM Studio lists — it answers a name it does not have
+  with whichever model is loaded, so Amanu checks the name and says so. The
+  address defaults to `http://127.0.0.1:1234/v1`. Transcription is not done by
+  LM Studio. The Windows app does not read these keys yet.
 - `mic_voice_processing` enables Apple's capture-time voice processing;
   `offline_echo_cancellation` (on by default) instead cleans a copy of the mic
   after recording, using system audio as the playback reference. It never

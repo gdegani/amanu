@@ -125,6 +125,7 @@ enum Analytics {
         if let llm = error as? LLMError {
             switch llm {
             case .http(let code, _): return code >= 500 ? .httpError : .refused
+            case .notConfigured: return .refused
             case .exit where llm.isTransient: return .noNetwork
             case .emptyResponse, .malformedResponse, .exit: return .unknown
             }

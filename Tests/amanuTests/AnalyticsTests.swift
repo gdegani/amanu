@@ -349,6 +349,8 @@ struct AnalyticsV2CatalogueTests {
             ("openai-api", "ft:customer:name", "custom"),
             ("ollama", "qwen3:8b", "qwen3:8b"),
             ("ollama", "samat/private-model", "custom-local"),
+            ("lmstudio", "google/gemma-4-12b", "custom-local"),
+            ("lmstudio", nil, "custom-local"),
             ("other", "whatever", "unknown"),
         ]
         for (backend, model, expected) in cases {

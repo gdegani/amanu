@@ -132,7 +132,6 @@ enum OllamaClient {
     }
 
     static func isLocal(baseURL: String) -> Bool {
-        guard let host = URL(string: baseURL)?.host?.lowercased() else { return false }
-        return OpenAICompatible.isLoopback(host)
+        OpenAICompatible.isLocal(baseURL: baseURL)
     }
 }

@@ -177,6 +177,27 @@ enum DoctorReport {
         /// Why the OpenAI Base URL will not be used, when it won't.
         var openAIEndpointProblem: String?
         var ollama: OllamaStatus = .unreachable
+        var lmstudio: LMStudioStatus = .notAsked
+    }
+
+    enum LMStudioStatus: Equatable {
+        /// Not asked, because nothing configured would use it.
+        case notAsked
+        case unreachable
+        /// The Base URL itself is refused — see `OpenAICompatible.EndpointError`.
+        case refused(String)
+        case running([LMStudio.Model])
+    }
+
+    /// The backends a route may walk, in order. `auto` does not walk LM Studio
+    /// unless the config names it — the same rule as `LLMBackend.available`,
+    /// and for the same reason: nobody should be asked about a server they
+    /// never set up, and the doctor must not knock on port 1234 for them.
+    static func backends(
+        of route: MeetingEgress.Route, settings: Config.SummarySettings
+    ) -> [String] {
+        guard route.preference == "auto" else { return [route.preference] }
+        return LLMBackend.names.filter { $0 != "lmstudio" || settings.lmstudioConfigured }
     }
 
     enum OllamaStatus: Equatable {
@@ -221,7 +242,7 @@ enum DoctorReport {
         settings: Config.SummarySettings
     ) -> Check {
         guard let route else { return Check(name: name, status: .ok, remediation: nil) }
-        let wanted = route.preference == "auto" ? LLMBackend.names : [route.preference]
+        let wanted = backends(of: route, settings: settings)
         guard route.preference == "auto" || LLMBackend.names.contains(route.preference) else {
             return Check(
                 name: name,
@@ -246,6 +267,25 @@ enum DoctorReport {
             // Where the meeting goes is what this line is for, so a route
             // that sends it off the Mac is a warning, as a cloud
             // transcription engine is — informative, never blocking.
+            if first == "lmstudio" {
+                guard OpenAICompatible.isLocal(baseURL: settings.lmstudioBaseURL) else {
+                    return Check(name: name, status: .warn(
+                        said + " · the transcript goes to \(settings.lmstudioBaseURL)"),
+                        remediation: nil)
+                }
+                // A model that is not in memory is loaded on demand with a
+                // context LM Studio picks, which was 8,192 tokens when
+                // measured: it works, but a long meeting is cut small.
+                if case .running(let models) = facts.lmstudio,
+                   let chosen = settings.lmstudioModel,
+                   LMStudio.model(named: chosen, in: models)?.isLoaded == false {
+                    return Check(name: name, status: .warn(
+                        said + " · \(chosen) is not loaded, so LM Studio will load it on demand "
+                            + "with a small context and long meetings are cut into many parts"),
+                        remediation: "load \(chosen) in LM Studio with a larger context")
+                }
+                return Check(name: name, status: .ok, remediation: nil)
+            }
             if first == "ollama" {
                 if case .running(let models) = facts.ollama,
                    SetupSelection.ollamaModel(named: settings.ollamaModel, in: models)?
@@ -270,7 +310,7 @@ enum DoctorReport {
                 name: name,
                 status: .warn("no backend is ready — " + problems.map(\.0).joined(separator: "; ")),
                 remediation: "paste a key in Setup, install the claude or codex CLI, or start "
-                    + "Ollama — or set summary.enabled=false")
+                    + "Ollama or LM Studio — or set summary.enabled=false")
         }
         return Check(name: name, status: .warn(what), remediation: fix)
     }
@@ -314,6 +354,32 @@ enum DoctorReport {
                 }
                 return nil
             }
+        case "lmstudio":
+            switch facts.lmstudio {
+            case .notAsked:
+                return ("LM Studio was not asked", "run amanu doctor")
+            case .refused(let why):
+                return ("the LM Studio Base URL is refused: \(why)",
+                        "fix summary.lmstudio_base_url")
+            case .unreachable:
+                return ("nothing answers at \(settings.lmstudioBaseURL)",
+                        "start LM Studio's server, or fix summary.lmstudio_base_url")
+            case .running(let models):
+                let have = models.filter(\.isChat).prefix(3).map(\.id).joined(separator: ", ")
+                guard let chosen = settings.lmstudioModel else {
+                    return ("no LM Studio model is chosen",
+                            "choose one in Setup or set summary.lmstudio_model"
+                                + (have.isEmpty ? "" : " — LM Studio has \(have)"))
+                }
+                // LM Studio answers a model it lacks with another one, so the
+                // request cannot be left to say so.
+                guard LMStudio.model(named: chosen, in: models) != nil else {
+                    return ("LM Studio is running but has no model \(chosen)",
+                            "set summary.lmstudio_model to one LM Studio lists"
+                                + (have.isEmpty ? "" : ", such as \(have)"))
+                }
+                return nil
+            }
         default:
             return ("\(backend) is not a backend amanu knows", "choose another backend")
         }
@@ -323,10 +389,8 @@ enum DoctorReport {
     /// that is never going to be run proves nothing, and neither does a
     /// request to an Ollama nobody configured.
     static func gatherFacts(for routes: [MeetingEgress.Route?]) -> ModelFacts {
-        let wanted = Set(routes.compactMap { $0 }.flatMap { route in
-            route.preference == "auto" ? LLMBackend.names : [route.preference]
-        })
         let settings = Config.summary()
+        let wanted = Set(routes.compactMap { $0 }.flatMap { backends(of: $0, settings: settings) })
         var facts = ModelFacts()
         if wanted.contains("claude-cli") { facts.claudeRuns = Tooling.probe("claude")?.runs == true }
         if wanted.contains("codex-cli") { facts.codexRuns = Tooling.probe("codex")?.runs == true }
@@ -339,7 +403,31 @@ enum DoctorReport {
         }
         facts.ollama = wanted.contains("ollama")
             ? ollamaStatus(baseURL: settings.ollamaBaseURL) : .notAsked
+        facts.lmstudio = wanted.contains("lmstudio")
+            ? lmstudioStatus(baseURL: settings.lmstudioBaseURL, key: Credentials.lmstudioKey())
+            : .notAsked
         return facts
+    }
+
+    /// LM Studio's answer, waited for in the same way as Ollama's.
+    static func lmstudioStatus(baseURL: String, key: String? = nil) -> LMStudioStatus {
+        do {
+            _ = try OpenAICompatible.url(baseURL: baseURL, path: "models")
+        } catch {
+            return .refused("\(error)")
+        }
+        guard Home.current.discoversTools else { return .unreachable }
+        final class Answer: @unchecked Sendable { var models: [LMStudio.Model]? }
+        let answer = Answer()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            answer.models = try? await LMStudio.listModels(baseURL: baseURL, key: key)
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + 5) == .success, let models = answer.models else {
+            return .unreachable
+        }
+        return .running(models)
     }
 
     /// Ollama's answer, waited for: the doctor is synchronous and prints in

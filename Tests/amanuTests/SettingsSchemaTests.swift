@@ -264,7 +264,7 @@ struct SettingsSchemaTests {
         #expect(!offered.contains("ja"), "the meeting-language menu now covers more than parakeet")
         // And the claim about the cards: every card setup offers, resolved
         // through the translation the form uses, and none of them is `none`.
-        let cards = ["claude-cli", "codex-cli", "api-key", "ollama"]
+        let cards = ["claude-cli", "codex-cli", "api-key", "ollama", "lmstudio"]
         let reachable = cards.flatMap { card in
             ["anthropic-api", "openai-api"].compactMap {
                 SetupSelection.summaryBackend(choice: card, keyBackend: $0)

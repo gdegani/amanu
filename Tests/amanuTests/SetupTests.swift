@@ -685,6 +685,86 @@ struct SetupTests {
         }
     }
 
+    @Test("LM Studio is a slim card with its endpoint, a model list and the download link")
+    @MainActor
+    func lmstudioCard() throws {
+        let setup = SetupWindow()
+        defer { withExtendedLifetime(setup) {} }
+        let panel = try #require(NSApp.windows.last { $0.title == "amanu setup" })
+        panel.contentView?.layoutSubtreeIfNeeded()
+        let card = try #require(panel.contentView?.allDescendants
+            .compactMap { $0 as? ChoiceCard }
+            .first { $0.id == "lmstudio" })
+        let fields = card.allDescendants.compactMap { $0 as? NSTextField }
+        let byID = Dictionary(uniqueKeysWithValues: fields.compactMap { field in
+            field.identifier.map { ($0.rawValue, field) }
+        })
+
+        #expect(byID["summary.lmstudio_base_url"]?.stringValue == "http://127.0.0.1:1234/v1")
+        // Chosen from what the server lists, because a name it lacks is not
+        // refused — it is answered by another model.
+        #expect(byID["summary.lmstudio_model"] is NSComboBox)
+        for (id, field) in byID {
+            let frame = field.convert(field.bounds, to: card)
+            #expect(frame.maxX <= card.bounds.maxX + 1, "\(id) spills outside the LM Studio card")
+        }
+        let link = try #require(card.allDescendants.compactMap { $0 as? NSButton }
+            .first { $0.title.hasPrefix("Get LM Studio") })
+        #expect(link.identifier?.rawValue == "https://lmstudio.ai/download")
+    }
+
+    @Test("Passing through LM Studio's fields writes nothing; a change writes it")
+    @MainActor
+    func lmstudioFieldsWriteOnlyChanges() throws {
+        let setup = SetupWindow()
+        defer { withExtendedLifetime(setup) {} }
+        let panel = try #require(NSApp.windows.last { $0.title == "amanu setup" })
+        let fields = (panel.contentView?.allDescendants.compactMap { $0 as? NSTextField } ?? [])
+            .filter { $0.identifier?.rawValue.hasPrefix("summary.lmstudio_") == true }
+        #expect(fields.count == 2)
+        let end = { (field: NSTextField) in
+            (field.delegate as? NSControlTextEditingDelegate)?.controlTextDidEndEditing?(
+                Notification(name: NSControl.textDidEndEditingNotification, object: field))
+        }
+
+        // A file that mentions LM Studio is what puts it in `auto`, so merely
+        // tabbing through the Base URL must not write the default into it.
+        for field in fields { end(field) }
+        #expect(!Config.summary().lmstudioConfigured)
+
+        let model = try #require(fields.first { $0 is NSComboBox })
+        model.stringValue = "google/gemma-4-12b"
+        end(model)
+        #expect(Config.summary().lmstudioModel == "google/gemma-4-12b")
+        #expect(Config.summary().lmstudioConfigured)
+    }
+
+    @Test("The LM Studio card says which of its states the server is in")
+    @MainActor
+    func lmstudioStatuses() {
+        func model(_ id: String, loaded: Bool? = true, type: String? = "llm") -> LMStudio.Model {
+            LMStudio.Model(
+                id: id, type: type, isLoaded: loaded, loadedContext: 8_192, maxContext: nil)
+        }
+        let a = model("a"), b = model("b", loaded: false)
+        let describe = { (models: [LMStudio.Model]?, chosen: String?, local: Bool) in
+            let chat = (models ?? []).filter(\.isChat)
+            return SetupForm.describeLMStudio(
+                models: models, chat: chat, chosen: chosen,
+                selected: chosen.flatMap { LMStudio.model(named: $0, in: models ?? []) },
+                isLocal: local)
+        }
+
+        #expect(describe(nil, nil, true) == "not answering")
+        #expect(describe([], nil, true) == "running, no models")
+        #expect(describe([model("e", type: "embeddings")], nil, true) == "running, no models")
+        #expect(describe([a, b], nil, true).hasPrefix("running · choose a model"))
+        #expect(describe([a, b], "zzz", true).hasPrefix("zzz is not there"))
+        #expect(describe([a, b], "a", true) == "running · a")
+        #expect(describe([a, b], "b", true) == "running · b · loads on demand")
+        #expect(describe([a, b], "a", false) == "running · a · remote")
+    }
+
     @Test("Local engines are separate cards with their download sizes")
     @MainActor
     func localEngineCards() throws {

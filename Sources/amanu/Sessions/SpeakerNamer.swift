@@ -113,7 +113,7 @@ enum SpeakerNamer {
                         title: title,
                         attendees: attendees,
                         app: app,
-                        limit: min(maxChars, backend.promptLimit ?? maxChars)
+                        limit: min(maxChars, await backend.effectivePromptLimit() ?? maxChars)
                     )
                 )
                 let proposals = try parse(answer)

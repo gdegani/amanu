@@ -96,8 +96,10 @@ enum MeetingEgress {
         parts += LLMBackend.available(
             preference: route.preference, anthropicModel: route.anthropicModel
         ).map { "\($0.name)=\($0.model ?? "-")" }
-        parts += [summary.openAIBaseURL, summary.ollamaBaseURL]
-        parts += [Config.anthropicKey(), Credentials.summaryOpenAIKey()].map { key in
+        parts += [summary.openAIBaseURL, summary.ollamaBaseURL, summary.lmstudioBaseURL]
+        parts += [
+            Config.anthropicKey(), Credentials.summaryOpenAIKey(), Credentials.lmstudioKey(),
+        ].map { key in
             key.map { digest($0) } ?? "-"
         }
         if purpose == .summary {

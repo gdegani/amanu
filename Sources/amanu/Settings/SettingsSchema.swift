@@ -363,11 +363,11 @@ enum SettingsSchema {
             Entry(["summary", "backend"],
                   localised("Which model to ask", "У какой модели спрашивать"),
                   localised(
-                      "auto walks the chain: claude CLI, Anthropic API, codex CLI, OpenAI API, ollama — subscriptions before metered keys. none skips summarizing without turning off the rest.",
+                      "auto walks the chain: claude CLI, Anthropic API, codex CLI, OpenAI API, LM Studio (once set up), ollama — subscriptions before metered keys. none skips summarizing without turning off the rest.",
                       "auto идёт по цепочке: claude CLI, Anthropic API, codex CLI, OpenAI API, "
-                          + "ollama — сначала подписки, потом платные ключи. none пропускает саммари, "
+                          + "LM Studio (если настроена), ollama — сначала подписки, потом платные ключи. none пропускает саммари, "
                           + "не выключая всего остального."),
-                  .choice(["auto", "claude-cli", "anthropic-api", "codex-cli", "openai-api", "ollama", "none"]),
+                  .choice(["auto", "claude-cli", "anthropic-api", "codex-cli", "openai-api", "lmstudio", "ollama", "none"]),
                   default: "auto"),
             Entry(["summary", "model"],
                   localised("Anthropic model", "Модель Anthropic"),
@@ -405,6 +405,20 @@ enum SettingsSchema {
                       "Где Amanu находит Ollama. Другая машина увидит содержимое встречи, и адрес у неё "
                           + "должен быть https — простой http принимается только на этом маке."),
                   .text, default: "http://127.0.0.1:11434"),
+            Entry(["summary", "lmstudio_model"],
+                  localised("LM Studio model", "Модель LM Studio"),
+                  localised(
+                      "The model id exactly as LM Studio lists it. LM Studio answers a request for a model it does not have with whichever model is loaded, so the name is checked against its list rather than trusted.",
+                      "Идентификатор модели так, как его показывает LM Studio. На запрос несуществующей "
+                          + "модели LM Studio отвечает загруженной, поэтому имя сверяется со списком."),
+                  .text, describedAs: localised("choose one in Setup", "выберите в настройке")),
+            Entry(["summary", "lmstudio_base_url"],
+                  localised("LM Studio Base URL", "Base URL LM Studio"),
+                  localised(
+                      "The API root, including /v1. Another machine sees the meeting, and must be reached over https — plain http is only accepted on this Mac.",
+                      "Корень API вместе с /v1. Другая машина увидит содержимое встречи, и адрес у неё "
+                          + "должен быть https — простой http принимается только на этом маке."),
+                  .text, default: "http://127.0.0.1:1234/v1"),
             Entry(["summary", "language"],
                   localised("Summary language", "Язык саммари"),
                   localised(
@@ -439,6 +453,13 @@ enum SettingsSchema {
                       "Откуда читается ключ к OpenAI Base URL, когда это не сама OpenAI, — "
                           + "OpenRouter, Groq, свой сервер."),
                   .text, describedAs: "~/.config/amanu/keys/openai-compatible"),
+            Entry(["summary", "lmstudio_api_key_path"],
+                  localised("LM Studio token file", "Файл токена LM Studio"),
+                  localised(
+                      "Only needed when LM Studio's Require Authentication is on. Read from this file alone: no other key is ever offered to LM Studio.",
+                      "Нужен, только если в LM Studio включена аутентификация. Читается только из этого "
+                          + "файла: никакой другой ключ LM Studio не передаётся."),
+                  .text, describedAs: "~/.config/amanu/keys/lmstudio"),
         ]),
 
         Section(title: localised("Calendar and naming", "Календарь и имена"), entries: [
@@ -475,7 +496,7 @@ enum SettingsSchema {
                           + "для имён; none — не спрашивать никакую модель."),
                   .choice([
                       "summary", "auto", "claude-cli", "anthropic-api", "codex-cli", "openai-api",
-                      "ollama", "none",
+                      "lmstudio", "ollama", "none",
                   ]),
                   default: "summary"),
             Entry(["speaker_names", "model"],

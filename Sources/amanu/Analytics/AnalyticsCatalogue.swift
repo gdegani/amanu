@@ -95,7 +95,7 @@ enum AnalyticsCatalogue {
         var result = properties
         let engines = ["auto"] + Array(Config.localEngines.union(Config.cloudEngines)).sorted()
         let backends = [
-            "auto", "claude-cli", "codex-cli", "anthropic-api", "openai-api", "ollama", "none",
+            "auto", "claude-cli", "codex-cli", "anthropic-api", "openai-api", "lmstudio", "ollama", "none",
         ]
         let allowed = [
             "engine": engines, "from_engine": engines, "to_engine": engines,
@@ -165,6 +165,10 @@ enum AnalyticsCatalogue {
             return model == "gpt-5" ? "gpt-5" : "custom"
         case "ollama":
             return model == "qwen3:8b" ? "qwen3:8b" : "custom-local"
+        case "lmstudio":
+            // LM Studio has no model of its own to name: whatever the person
+            // downloaded is what it serves, and its ids are registry paths.
+            return "custom-local"
         default:
             return "unknown"
         }

@@ -21,6 +21,10 @@ struct LLMBackend: Sendable {
     /// or split a transcript to fit rather than letting the backend drop the
     /// part it has no room for.
     var promptLimit: Int? = nil
+    /// A better answer to `promptLimit`, asked for when the prompt is about
+    /// to be cut: a server that knows how much room its model has, which
+    /// Ollama is told and LM Studio is not. nil leaves `promptLimit` alone.
+    var resolvePromptLimit: (@Sendable () async -> Int?)? = nil
     /// Whether this backend is only in the chain because `auto` ends with
     /// it, and nobody chose it or set it up — Ollama on a Mac that has never
     /// been told about one.
@@ -35,10 +39,16 @@ struct LLMBackend: Sendable {
     /// (system prompt, user prompt) → completion text.
     let call: @Sendable (String, String) async throws -> String
 
+    /// How many characters of prompt this backend can read whole now.
+    func effectivePromptLimit() async -> Int? {
+        if let resolvePromptLimit, let limit = await resolvePromptLimit() { return limit }
+        return promptLimit
+    }
+
     /// Every preference the chain understands, in the order `auto` walks
     /// them. `none` is not here: it is a decision not to ask, which
     /// `MeetingEgress` takes before anything reaches this type.
-    static let names = ["claude-cli", "anthropic-api", "codex-cli", "openai-api", "ollama"]
+    static let names = ["claude-cli", "anthropic-api", "codex-cli", "openai-api", "lmstudio", "ollama"]
 
     /// The backends to try, in order.
     ///
@@ -81,6 +91,14 @@ struct LLMBackend: Sendable {
         // of its own — see `Credentials.summaryOpenAIKey`.
         if let key = Credentials.summaryOpenAIKey() {
             candidates.append(openAI(key: key, model: openAIModelID, baseURL: settings.openAIBaseURL))
+        }
+        // LM Studio is in the chain only when somebody set it up, and then
+        // ahead of Ollama: a server named in the config is a choice, where
+        // the Ollama below is only what `auto` ends with.
+        if settings.lmstudioConfigured || preference == "lmstudio" {
+            candidates.append(lmstudio(
+                model: settings.lmstudioModel, baseURL: settings.lmstudioBaseURL,
+                key: Credentials.lmstudioKey()))
         }
         var local = ollama(model: settings.ollamaModel, baseURL: settings.ollamaBaseURL)
         local.isUnchosenFallback = preference != local.name && !settings.ollamaConfigured
@@ -329,35 +347,94 @@ struct LLMBackend: Sendable {
 
     private static func openAI(key: String, model: String, baseURL: String) -> LLMBackend {
         LLMBackend(name: "openai-api", model: model) { system, prompt in
-            let url = try OpenAICompatible.url(baseURL: baseURL, path: "chat/completions")
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 600
-            request.setValue("application/json", forHTTPHeaderField: "content-type")
-            request.setValue("Bearer \(key)", forHTTPHeaderField: "authorization")
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "model": model,
-                "messages": [
-                    ["role": "system", "content": system],
-                    ["role": "user", "content": prompt],
-                ],
-            ])
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                // The API's own message names the problem — a model this
-                // account can't see, a spent quota — and is worth reading
-                // rather than paraphrasing.
-                throw LLMError.http(http.statusCode, text(data))
-            }
-            guard
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let choices = json["choices"] as? [[String: Any]],
-                let message = choices.first?["message"] as? [String: Any],
-                let content = message["content"] as? String
-            else { throw LLMError.malformedResponse("openai-api") }
-            return content
+            try await chatCompletion(
+                backend: "openai-api", baseURL: baseURL, key: key, model: model,
+                system: system, prompt: prompt, timeout: 600)
         }
+    }
+
+    /// One `chat/completions` call against an OpenAI-shaped server. `key` is
+    /// nil for a server that wants none, and then no `Authorization` header
+    /// is sent at all — LM Studio with authentication off, which has no use
+    /// for one and is no place to put a secret.
+    ///
+    /// `temperature` is only sent when asked for: OpenAI's own newer models
+    /// refuse any value but their default.
+    static func chatCompletion(
+        backend: String, baseURL: String, key: String?, model: String,
+        system: String, prompt: String, timeout: TimeInterval, temperature: Double? = nil,
+        session: URLSession = .shared
+    ) async throws -> String {
+        let request = try chatCompletionRequest(
+            baseURL: baseURL, key: key, model: model, system: system, prompt: prompt,
+            timeout: timeout, temperature: temperature)
+        let (data, response) = try await session.data(for: request)
+        return try chatCompletionText(
+            from: data, statusCode: (response as? HTTPURLResponse)?.statusCode ?? 200,
+            backend: backend, requireText: backend != "openai-api")
+    }
+
+    static func chatCompletionRequest(
+        baseURL: String, key: String?, model: String, system: String, prompt: String,
+        timeout: TimeInterval, temperature: Double? = nil
+    ) throws -> URLRequest {
+        let url = try OpenAICompatible.url(baseURL: baseURL, path: "chat/completions")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        if let key { request.setValue("Bearer \(key)", forHTTPHeaderField: "authorization") }
+        var body: [String: Any] = [
+            "model": model,
+            "messages": [
+                ["role": "system", "content": system],
+                ["role": "user", "content": prompt],
+            ],
+        ]
+        if let temperature { body["temperature"] = temperature }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    static func chatCompletionText(
+        from data: Data, statusCode: Int, backend: String, requireText: Bool
+    ) throws -> String {
+        if statusCode != 200 {
+            // The API's own message names the problem — a model this
+            // account can't see, a spent quota, a context too small — and is
+            // worth reading rather than paraphrasing.
+            throw LLMError.http(statusCode, text(data))
+        }
+        guard
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let choices = json["choices"] as? [[String: Any]],
+            let message = choices.first?["message"] as? [String: Any],
+            let content = message["content"] as? String
+        else { throw LLMError.malformedResponse(backend) }
+        if requireText, content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw LLMError.emptyResponse(backend)
+        }
+        return content
+    }
+
+    private static func lmstudio(model: String?, baseURL: String, key: String?) -> LLMBackend {
+        var backend = LLMBackend(
+            name: "lmstudio", model: model,
+            promptLimit: LMStudio.defaultPromptLimit
+        ) { system, prompt in
+            guard let model else { throw LLMError.notConfigured("lmstudio", "summary.lmstudio_model") }
+            return try await chatCompletion(
+                backend: "lmstudio", baseURL: baseURL, key: key, model: model,
+                system: system, prompt: prompt, timeout: 1_800, temperature: 0.2)
+        }
+        // The context belongs to how the model was loaded, which only the
+        // server knows; a listing that fails leaves the conservative default.
+        backend.resolvePromptLimit = {
+            guard let models = try? await LMStudio.listModels(baseURL: baseURL, key: key)
+            else { return nil }
+            return LMStudio.promptLimit(for: model, in: models)
+        }
+        return backend
     }
 
     // MARK: - local
@@ -409,6 +486,9 @@ enum LLMError: Error, CustomStringConvertible {
     case malformedResponse(String)
     case http(Int, String)
     case exit(Int, String)
+    /// A backend that was asked for before it was told what to ask: the
+    /// setting that is missing, named.
+    case notConfigured(String, String)
 
     var description: String {
         switch self {
@@ -416,6 +496,8 @@ enum LLMError: Error, CustomStringConvertible {
         case .malformedResponse(let backend): return "\(backend) returned an unexpected shape"
         case .http(let code, let body): return "HTTP \(code): \(body)"
         case .exit(let code, let output): return "exited \(code): \(output)"
+        case .notConfigured(let backend, let setting):
+            return "\(backend) has no model chosen — set \(setting)"
         }
     }
 
@@ -451,7 +533,7 @@ enum LLMError: Error, CustomStringConvertible {
         case .exit(_, let output):
             let haystack = output.lowercased()
             return isUsageLimit || Self.transientMarkers.contains { haystack.contains($0) }
-        case .emptyResponse, .malformedResponse:
+        case .emptyResponse, .malformedResponse, .notConfigured:
             // The model answered; it just answered badly. Repeating the same
             // request is unlikely to change that.
             return false

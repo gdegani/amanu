@@ -172,7 +172,7 @@ enum Summarizer {
         backend: LLMBackend
     ) async throws -> String {
         let system = systemPrompt(language: settings.language)
-        let limit = min(maxCharsPerCall, backend.promptLimit ?? maxCharsPerCall)
+        let limit = min(maxCharsPerCall, await backend.effectivePromptLimit() ?? maxCharsPerCall)
         if body.count <= limit {
             return try await backend.call(system, singlePassPrompt(
                 body: body, header: header, template: settings.template))

@@ -452,7 +452,8 @@ enum Config {
 
     /// Post-transcript summarization. `backend: auto` walks the chain in
     /// LLMBackend: the local `claude` CLI, the Anthropic API, the `codex` CLI,
-    /// the OpenAI API, then ollama — subscriptions before metered keys.
+    /// the OpenAI API, then LM Studio when it is configured, then ollama —
+    /// subscriptions before metered keys.
     struct SummarySettings {
         var enabled = Config.defaultFlag(.summaryEnabled)
         var backend = Config.defaultString(.summaryBackend)
@@ -480,6 +481,16 @@ enum Config {
         /// of its own. Without either, the Ollama at the end of `auto` is a
         /// guess nobody made; see `LLMBackend.isUnchosenFallback`.
         var ollamaConfigured = false
+        /// The model LM Studio is asked for, nil until somebody names one.
+        /// There is no default: LM Studio answers a request for a model it
+        /// does not have with whatever is loaded, so a guessed name would
+        /// quietly attribute a summary to the wrong model.
+        var lmstudioModel: String?
+        var lmstudioBaseURL = Config.defaultString(.summaryLMStudioBaseURL)
+        /// Whether the file says anything about LM Studio. Unlike Ollama, it
+        /// is not in `auto` on a guess: a Mac that was never told about it
+        /// does not try port 1234.
+        var lmstudioConfigured = false
     }
 
     static func summary() -> SummarySettings {
@@ -512,6 +523,10 @@ enum Config {
         settings.apiKeyPath = text(.summaryKeyPath, in: root).map { Home.current.expanding($0) }
         settings.ollamaConfigured = text(.summaryOllamaModel, in: root) != nil
             || text(.summaryOllamaBaseURL, in: root) != nil
+        settings.lmstudioModel = text(.summaryLMStudioModel, in: root)?.trimmed
+        settings.lmstudioBaseURL = string(.summaryLMStudioBaseURL, in: root).trimmed
+        settings.lmstudioConfigured = settings.lmstudioModel != nil
+            || text(.summaryLMStudioBaseURL, in: root) != nil
         return settings
     }
 

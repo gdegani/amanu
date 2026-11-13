@@ -406,10 +406,38 @@ table from the command line into the file's. Each server is switched off by
 name instead (`LLMBackend.codexArguments`), and naming one the file does not
 define stops codex outright, so the names are read from the file each time.
 
+## LM Studio answers for a model it does not have
+
+Ask LM Studio's `chat/completions` for a model it does not have, or for an
+embedding model, and it does not refuse: it answers with whichever model is
+loaded. A mistyped `summary.lmstudio_model` therefore produces summaries, and
+the transcript, the log and analytics all say another model wrote them.
+Setup and the doctor check the name against the server's own list
+(`LMStudio.model(named:in:)`); the request itself cannot be trusted to do it.
+
+Three more rules follow from the same server, each pinned by a test:
+
+- LM Studio joins `auto` only when the config names it, and ahead of the
+  Ollama `auto` ends with. A file that merely mentions it is enough, which is
+  why Setup's LM Studio fields write nothing when they repeat what is in force.
+- Its token is read from `summary.lmstudio_api_key_path` alone
+  (`Credentials.lmstudioKey`). `summaryOpenAIKey` offers the OpenAI key to any
+  server on this Mac as a last resort; that must never reach LM Studio, which
+  with authentication off needs no header at all.
+- A prompt over the context it was loaded with is an HTTP 400, final and not
+  retried. A model loaded on demand gets 8,192 tokens, a hand-loaded one
+  whatever was set in the app, so `LLMBackend.effectivePromptLimit` asks the
+  server for the loaded context before a transcript is cut.
+
 # What has never been verified
 
 Not defects, and not oversights: places where the code is believed correct on
 reasoning alone. Worth knowing before trusting any of them in front of someone.
+
+- **LM Studio with Require Authentication on.** Everything about it was measured
+  with authentication off. The token is sent as a bearer and read from its own
+  file, but no token has met a real server, and the listing at `/api/v0/models`
+  has not been seen refusing one.
 
 - **The login item actually capturing system audio.** Registration works and
   `SMAppService.mainApp` reports enabled, but nobody has logged out and back in

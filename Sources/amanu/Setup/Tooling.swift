@@ -87,6 +87,14 @@ enum Tooling {
         return try? await OllamaClient.listModels(baseURL: Config.summary().ollamaBaseURL)
     }
 
+    /// What the configured LM Studio has, and nil when nothing answers.
+    static func lmstudioModels() async -> [LMStudio.Model]? {
+        guard Home.current.discoversTools else { return nil }
+        let settings = Config.summary()
+        return try? await LMStudio.listModels(
+            baseURL: settings.lmstudioBaseURL, key: Credentials.lmstudioKey())
+    }
+
     // MARK: - the cache
 
     private static let cache = Cache()

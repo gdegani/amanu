@@ -18,7 +18,7 @@ enum OpenAICompatible {
             case .insecure(let host, let baseURL):
                 return "\(baseURL) is plain http to \(host), which would carry the meeting "
                     + "across the network unencrypted — use https for a server on another "
-                    + "machine (a TLS proxy in front of Ollama will do), or an address on this Mac"
+                    + "machine (a TLS proxy in front of the server will do), or an address on this Mac"
             }
         }
     }
@@ -50,6 +50,14 @@ enum OpenAICompatible {
             throw EndpointError.invalid(baseURL)
         }
         return url
+    }
+
+    /// Whether a Base URL points at this Mac, which is where a meeting may
+    /// travel over plain http and stay put.
+    static func isLocal(baseURL: String) -> Bool {
+        guard let host = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines))?
+            .host?.lowercased() else { return false }
+        return isLoopback(host)
     }
 
     static func isLoopback(_ host: String) -> Bool {

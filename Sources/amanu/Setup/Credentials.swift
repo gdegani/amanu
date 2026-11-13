@@ -139,6 +139,15 @@ enum Credentials {
         return OpenAICompatible.isLoopback(host) ? Config.openAIKey() : nil
     }
 
+    /// The token LM Studio is sent, when it has authentication on: the file
+    /// `summary.lmstudio_api_key_path` names, and nothing else. Not the
+    /// OpenAI key, which `summaryOpenAIKey` offers to any server on this Mac —
+    /// LM Studio has no use for it, and one that needs no token should get
+    /// no header at all.
+    static func lmstudioKey(in config: [String: Any]? = Config.raw()) -> String? {
+        pathSetting(.summaryLMStudioKeyPath, in: config).flatMap { Config.secret(at: $0) }
+    }
+
     private static func pathSetting(_ key: Config.Key, in config: [String: Any]?) -> URL? {
         Config.text(key, in: config).map { Home.current.expanding($0) }
     }

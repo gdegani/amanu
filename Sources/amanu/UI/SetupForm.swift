@@ -192,6 +192,12 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
     private var summaryOpenAIBaseURLRow: NSView?
     private let summaryOllamaBaseURL = NSTextField()
     private let summaryOllamaModel = NSTextField()
+    private let summaryLMStudioBaseURL = NSTextField()
+    /// A combo box, not a plain field: LM Studio lists what it has, and a name
+    /// it does not have is not an error it reports — it answers with another
+    /// model — so the person picks from the list and the field is a field only
+    /// for when the server is off and the list is empty.
+    private let summaryLMStudioModel = NSComboBox()
     private lazy var summaryKeyLink = link(
         localised("Get a key", "Получить ключ"),
         "https://console.anthropic.com/settings/keys")
@@ -757,7 +763,38 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
                 localised("Install Ollama", "Установить Ollama"),
                 "https://ollama.com/download/mac")])
 
-        summaryCards.adopt([claude, codex, key, ollama])
+        // LM Studio sits beside Ollama for the same reason: a local fallback,
+        // not a peer of the three. It is shown whether or not it is installed,
+        // since there is no binary to look for; the server answering is the
+        // only evidence it is there.
+        configureSummaryField(summaryLMStudioBaseURL, id: "summary.lmstudio_base_url")
+        configureSummaryField(summaryLMStudioModel, id: "summary.lmstudio_model")
+        summaryLMStudioModel.placeholderString = localised(
+            "pick one LM Studio has", "выберите из списка LM Studio")
+        summaryLMStudioModel.completes = true
+        summaryLMStudioModel.numberOfVisibleItems = 8
+        summaryLMStudioModel.target = self
+        summaryLMStudioModel.action = #selector(lmstudioModelPicked)
+        let lmstudioOptions = NSStackView(views: [
+            summaryFieldRow(localised("Base URL", "URL сервера"), summaryLMStudioBaseURL),
+            summaryFieldRow(localised("Model", "Модель"), summaryLMStudioModel),
+        ])
+        lmstudioOptions.orientation = .vertical
+        lmstudioOptions.alignment = .leading
+        lmstudioOptions.spacing = 6
+        let lmstudio = ChoiceCard(
+            id: "lmstudio",
+            title: "LM Studio",
+            detail: localised(
+                "Local by default. A remote URL sends the transcript there.",
+                "По умолчанию локально. Удалённый URL получит расшифровку."),
+            accessories: [
+                lmstudioOptions,
+                link(
+                    localised("Get LM Studio", "Скачать LM Studio"),
+                    "https://lmstudio.ai/download")])
+
+        summaryCards.adopt([claude, codex, key, ollama, lmstudio])
         summaryCards.onChange = { [weak self] id in
             guard let self else { return }
             Config.update(path: ["summary", "backend"], value: SetupSelection.summaryBackend(
@@ -766,12 +803,12 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         }
         let disclosure = SetupLayout.detail(
             localised(
-                "Claude, Codex and API models receive meeting content. Ollama stays on this Mac only with a localhost URL.",
-                "Claude, Codex и API-модели получают данные встречи. Ollama остаётся на этом маке только с localhost URL."),
+                "Claude, Codex and API models receive meeting content. Ollama and LM Studio stay on this Mac only with a localhost URL.",
+                "Claude, Codex и API-модели получают данные встречи. Ollama и LM Studio остаются на этом маке только с localhost URL."),
             lines: 2,
             width: 520)
         return SetupLayout.group(
-            [SetupLayout.cards([claude, codex, key]), ollama, disclosure],
+            [SetupLayout.cards([claude, codex, key]), ollama, lmstudio, disclosure],
             spacing: SetupLayout.cardGap)
     }
 
@@ -1424,12 +1461,34 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             (summaryOpenAIModel, "openai_model"),
             (summaryOllamaBaseURL, "ollama_base_url"),
             (summaryOllamaModel, "ollama_model"),
+            (summaryLMStudioBaseURL, "lmstudio_base_url"),
+            (summaryLMStudioModel, "lmstudio_model"),
         ]
         if let key = summaryPaths.first(where: { $0.0 === field })?.1 {
-            let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            Config.update(path: ["summary", key], value: value.isEmpty ? nil : value)
-            refresh()
+            saveSummaryField(field, key: key)
         }
+    }
+
+    /// Write what a summary field says, except that LM Studio's fields write
+    /// nothing when they only repeat what is already in force. Merely passing
+    /// through the Base URL would otherwise put the default in the file, and a
+    /// file that mentions LM Studio is what makes `auto` try it.
+    private func saveSummaryField(_ field: NSTextField, key: String) {
+        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if field === summaryLMStudioBaseURL || field === summaryLMStudioModel {
+            let settings = Config.summary()
+            let current = field === summaryLMStudioBaseURL
+                ? settings.lmstudioBaseURL : (settings.lmstudioModel ?? "")
+            if value == current { return }
+            // An emptied Base URL means the default, and is no change either.
+            if field === summaryLMStudioBaseURL, value.isEmpty { return }
+        }
+        Config.update(path: ["summary", key], value: value.isEmpty ? nil : value)
+        refresh()
+    }
+
+    @objc private func lmstudioModelPicked() {
+        saveSummaryField(summaryLMStudioModel, key: "lmstudio_model")
     }
 
     /// Return in a key field submits the key and stops there.
@@ -1454,6 +1513,7 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
               control === cloudKey || control === summaryKey
                 || control === summaryOpenAIBaseURL || control === summaryOpenAIModel
                 || control === summaryOllamaBaseURL || control === summaryOllamaModel
+                || control === summaryLMStudioBaseURL || control === summaryLMStudioModel
         else { return false }
         control.window?.makeFirstResponder(nil)
         return true
@@ -1620,7 +1680,26 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         }
         ollamaCard?.showLink(ollama == nil && ollamaIsLocal)
 
+        let lmstudioModels = await Tooling.lmstudioModels()
+        let lmstudioSettings = Config.summary()
+        let lmstudioIsLocal = OpenAICompatible.isLocal(baseURL: lmstudioSettings.lmstudioBaseURL)
+        let lmstudioCard = summaryCards.card("lmstudio")
+        let lmstudioChat = (lmstudioModels ?? []).filter(\.isChat)
+        summaryLMStudioModel.removeAllItems()
+        summaryLMStudioModel.addItems(withObjectValues: lmstudioChat.map(\.id))
+        let lmstudioSelected = lmstudioSettings.lmstudioModel.flatMap {
+            LMStudio.model(named: $0, in: lmstudioModels ?? [])
+        }
+        lmstudioCard?.report(
+            Self.describeLMStudio(
+                models: lmstudioModels, chat: lmstudioChat,
+                chosen: lmstudioSettings.lmstudioModel, selected: lmstudioSelected,
+                isLocal: lmstudioIsLocal),
+            good: lmstudioSelected != nil)
+        lmstudioCard?.showLink(lmstudioModels == nil && lmstudioIsLocal)
+
         summaryToolRuns = [
+            "lmstudio": lmstudioSelected != nil,
             "claude-cli": claude?.runs == true,
             "codex-cli": codex?.runs == true,
             "ollama": models.map {
@@ -1629,6 +1708,38 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
             } ?? false,
         ]
         refresh()
+    }
+
+    /// What the LM Studio card says, from what the server answered. The
+    /// states are the ones the summary will meet: nothing answering, an
+    /// answer with nothing to write with, no model chosen, a chosen model the
+    /// server has not got — which LM Studio would paper over by answering
+    /// with another — and the good case, which says whether the model is in
+    /// memory, because one that is not is loaded on demand with a context
+    /// that may be smaller than the person set.
+    static func describeLMStudio(
+        models: [LMStudio.Model]?, chat: [LMStudio.Model], chosen: String?,
+        selected: LMStudio.Model?, isLocal: Bool
+    ) -> String {
+        guard models != nil else {
+            return localised("not answering", "не отвечает")
+        }
+        guard !chat.isEmpty else {
+            return localised("running, no models", "работает, моделей нет")
+        }
+        let names = chat.prefix(2).map(\.id).joined(separator: ", ")
+        guard let chosen else {
+            return localised("running · choose a model · ", "работает · выберите модель · ") + names
+        }
+        guard let selected else {
+            return localised("\(chosen) is not there · ", "нет модели \(chosen) · ") + names
+        }
+        var said = localised("running · ", "работает · ") + selected.id
+        if selected.isLoaded == false {
+            said += localised(" · loads on demand", " · загрузится при запросе")
+        }
+        if !isLocal { said += localised(" · remote", " · удалённо") }
+        return said
     }
 
     private static func describe(_ tool: Tooling.Found?) -> String {
@@ -1777,6 +1888,8 @@ final class SetupForm: NSObject, NSTextFieldDelegate {
         summaryOpenAIModel.stringValue = summary.openAIModel
         summaryOllamaBaseURL.stringValue = summary.ollamaBaseURL
         summaryOllamaModel.stringValue = summary.ollamaModel
+        summaryLMStudioBaseURL.stringValue = summary.lmstudioBaseURL
+        summaryLMStudioModel.stringValue = summary.lmstudioModel ?? ""
         showKeyProvider()
         for card in summaryCards.cards { card.isEnabled = summary.enabled }
 

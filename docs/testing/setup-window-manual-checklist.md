@@ -244,6 +244,26 @@ for it any more.
   installed models. When Ollama is absent it reads **not here** and offers
   **Install Ollama** → `https://ollama.com/download/mac`; when present, the
   link is hidden.
+- Confirm **LM Studio** is a second slim row below Ollama, with a Base URL and a
+  Model field and the link **Get LM Studio** → `https://lmstudio.ai/download`.
+  The Model field is a drop-down of what LM Studio lists, and still takes typing
+  when the server is off. With LM Studio's server running (Developer tab), check
+  each state the card reports, in this order:
+  - server off: **not answering**, and the link is visible;
+  - on, nothing chosen: **running · choose a model · …**, listing up to two
+    models and never an embedding model;
+  - a model that is loaded: **running · name**, in green;
+  - a model that is downloaded but not loaded: **running · name · loads on
+    demand** — and `amanu doctor` warns that it will be cut small;
+  - a name LM Studio does not have: **name is not there · …** in orange. This is
+    the one that matters: LM Studio itself would answer with another model.
+- Tab through **Base URL** and **Model** without typing and open the config file:
+  nothing about LM Studio may have been written, or `auto` would start trying it.
+- Choose LM Studio, quit LM Studio, press Done: the outstanding line says the
+  chosen summary backend is missing, as it does for Ollama.
+- With **Require Authentication** on in LM Studio and a token in
+  `summary.lmstudio_api_key_path`, confirm the card still lists models. This has
+  never been run against a real token; see `docs/pitfalls.md`.
 
 ## Audio retention
 

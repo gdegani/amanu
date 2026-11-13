@@ -124,7 +124,8 @@ sanitising them that stays true as the code changes.
 Model names are closed in the same way. The transcript and local logs keep the
 exact model as provenance, but analytics sends only public models amanu knows.
 An unrecognised cloud or fine-tuned model becomes `custom`; an unrecognised
-Ollama model becomes `custom-local`. Registry namespaces and arbitrary config
+Ollama model becomes `custom-local`, and every LM Studio model does, since its
+ids are registry paths of whatever somebody downloaded. Registry namespaces and arbitrary config
 text never travel.
 
 ## Which settings are reportable
